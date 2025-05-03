@@ -1,0 +1,9 @@
+# Ignore everything
+*
+
+# Don't ignore the following files and folders
+!.gitignore
+!pubspec.yaml
+!pubspec.lock
+!lib/
+!lib/**
