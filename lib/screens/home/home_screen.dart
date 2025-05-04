@@ -1,10 +1,11 @@
-// home_screen.dart (add this to your screens directory)
+// home_screen.dart (with location functionality added)
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:location/location.dart'; // Add this package for location services
 
 import '../../models/visit_model.dart';
 import '../../theme/app_colors.dart';
@@ -21,20 +22,91 @@ class HomeScreen extends StatefulWidget {
 }
 
 enum _VisitStatus {
-    completed,
-    pending,
-    missed,
-  }
+  completed,
+  pending,
+  missed,
+}
 
 class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
   late TabController _visitTabController;
-
   
+  // Add map controller to control the map view
+  final MapController _mapController = MapController();
+  
+  // Default location (Algiers)
+  LatLng _currentLocation = const LatLng(36.7525, 3.0420);
+  
+  // Location service
+  final Location _location = Location();
+  
+  // For tracking user location on map
+  bool _locationServiceEnabled = false;
+  PermissionStatus? _permissionGranted;
+  LocationData? _locationData;
   
   @override
   void initState() {
     super.initState();
     _visitTabController = TabController(length: 3, vsync: this);
+    _initLocationService(); // Initialize location service
+  }
+
+  // Initialize location service
+  Future<void> _initLocationService() async {
+    _locationServiceEnabled = await _location.serviceEnabled();
+    if (!_locationServiceEnabled) {
+      _locationServiceEnabled = await _location.requestService();
+      if (!_locationServiceEnabled) {
+        return;
+      }
+    }
+
+    _permissionGranted = await _location.hasPermission();
+    if (_permissionGranted == PermissionStatus.denied) {
+      _permissionGranted = await _location.requestPermission();
+      if (_permissionGranted != PermissionStatus.granted) {
+        return;
+      }
+    }
+  }
+
+  // Get current location and move map to it
+  Future<void> _getCurrentLocation() async {
+    try {
+      // Check if location services are enabled
+      if (!_locationServiceEnabled) {
+        await _initLocationService();
+        if (!_locationServiceEnabled) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Location services are disabled')),
+          );
+          return;
+        }
+      }
+
+      // Get current location
+      _locationData = await _location.getLocation();
+      
+      if (_locationData != null) {
+        setState(() {
+          _currentLocation = LatLng(
+            _locationData!.latitude ?? _currentLocation.latitude,
+            _locationData!.longitude ?? _currentLocation.longitude,
+          );
+        });
+        
+        // Move map to current location
+        _mapController.move(_currentLocation, 14.0);
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Location updated')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error getting location: $e')),
+      );
+    }
   }
 
   @override
@@ -367,40 +439,23 @@ Widget _buildLegendItem(Color color, String label) {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text("Field Operations Map", style: AppTextStyles.subheading),
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(4),
-                        border: Border.all(color: AppColors.divider),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(Icons.layers, size: 16, color: AppColors.secondary),
-                          SizedBox(width: 4),
-                          Text("Layers", style: AppTextStyles.bodySmall),
-                        ],
-                      ),
+                GestureDetector(
+                  onTap: _getCurrentLocation, // Call method to get current location
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: AppColors.divider),
                     ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(4),
-                        border: Border.all(color: AppColors.divider),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(Icons.my_location, size: 16, color: AppColors.secondary),
-                          SizedBox(width: 4),
-                          Text("My Location", style: AppTextStyles.bodySmall),
-                        ],
-                      ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.my_location, size: 16, color: AppColors.secondary),
+                        SizedBox(width: 4),
+                        Text("My Location", style: AppTextStyles.bodySmall),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ],
             ),
@@ -408,8 +463,9 @@ Widget _buildLegendItem(Color color, String label) {
           SizedBox(
             height: 240,
             child: FlutterMap(
+              mapController: _mapController, // Add the map controller
               options: MapOptions(
-                center: LatLng(36.7525, 3.0420), // Algiers coordinates
+                center: _currentLocation, // Use current location
                 zoom: 12,
               ),
               children: [
@@ -417,13 +473,13 @@ Widget _buildLegendItem(Color color, String label) {
                   urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
                   subdomains: const ['a', 'b', 'c'],
                 ),
-                const MarkerLayer(
+                MarkerLayer(
                   markers: [
                     Marker(
-                      point: LatLng(36.7525, 3.0420),
+                      point: _currentLocation, // Use current location for marker
                       width: 40,
                       height: 40,
-                      child: Icon(
+                      child: const Icon(
                         Icons.location_on,
                         color: AppColors.primary,
                         size: 40,
@@ -457,8 +513,8 @@ Widget _buildLegendItem(Color color, String label) {
                 const Text("Visit Management", style: AppTextStyles.subheading),
                 ElevatedButton.icon(
                   onPressed: () {},
-                  icon: const Icon(Icons.add, size: 16,color: Colors.white,),
-                  label: const Text("Add Visit",style: TextStyle(color: Colors.white),),
+                  icon: const Icon(Icons.add, size: 16, color: Colors.white,),
+                  label: const Text("Add Visit", style: TextStyle(color: Colors.white),),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -552,9 +608,6 @@ Widget _buildLegendItem(Color color, String label) {
       },
     );
   }
-
-  // Helper enum for visit status
-  
 
   _VisitStatus _getVisitStatus(String startTimeStr, String endTimeStr) {
     // Parse the time strings assuming they're in format like "09:30"
